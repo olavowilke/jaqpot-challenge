@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AppDataSource } from '../db/data-source.js';
 import {
   ProviderBet,
+  ProviderCasino,
   ProviderCustomer,
   ProviderGame,
   ProviderGameRound,
@@ -45,6 +46,14 @@ providerRouter.post(
     if (!game) throw new AppError(404, 'PROVIDER_GAME_NOT_FOUND', 'Game not found');
     if (!game.isActive) throw new AppError(409, 'PROVIDER_GAME_INACTIVE', 'Game inactive');
 
+    // Resolve the casino directory entry — provider_customers is now keyed
+    // by casino_id, not the free-text casino_code from the request body.
+    const casino = await AppDataSource.getRepository(ProviderCasino).findOneBy({
+      casinoCode: input.casinoCode,
+    });
+    if (!casino) throw new AppError(404, 'CASINO_NOT_FOUND', 'Casino not found');
+    if (!casino.isActive) throw new AppError(409, 'CASINO_INACTIVE', 'Casino is not active');
+
     // Upsert customer (player_id is unique).
     const playerKey = `${input.casinoCode}:${input.userId}`;
     const customerRepo = AppDataSource.getRepository(ProviderCustomer);
@@ -54,7 +63,7 @@ providerRouter.post(
         customer = await customerRepo.save(
           customerRepo.create({
             playerId: playerKey,
-            casinoCode: input.casinoCode,
+            casinoId: casino.id,
             externalUserId: input.userId,
           }),
         );
@@ -83,6 +92,7 @@ providerRouter.post(
 // reads any CASINO_* table — it only touches its own domain and calls back
 // to the casino over HTTP.
 const SimulateSchema = z.object({
+  casinoCode: z.string(),
   casinoSessionToken: z.string(),
   providerSessionId: z.string(),
   customerId: z.string().uuid(),
@@ -103,8 +113,19 @@ providerRouter.post(
     const input = SimulateSchema.parse(req.body);
     const trace: Array<{ step: string; result: unknown }> = [];
 
+    const casinoRow = await AppDataSource.getRepository(ProviderCasino).findOneBy({
+      casinoCode: input.casinoCode,
+    });
+    if (!casinoRow) throw new AppError(404, 'CASINO_NOT_FOUND', 'Casino not found');
+    if (!casinoRow.isActive) throw new AppError(409, 'CASINO_INACTIVE', 'Casino is not active');
+
     const casino = <T = CasinoOk>(path: string, body: unknown) =>
-      signedPost<T>(`${config.CASINO_BASE_URL}${path}`, body, config.CASINO_SECRET, 'x-casino-signature');
+      signedPost<T>(
+        `${casinoRow.casinoApiEndpoint}${path}`,
+        body,
+        casinoRow.casinoSecret,
+        'x-casino-signature',
+      );
 
     // 1) Initial balance check.
     const initBal = await casino('/casino/getBalance', { sessionToken: input.casinoSessionToken });

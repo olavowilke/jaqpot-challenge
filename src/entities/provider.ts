@@ -26,6 +26,30 @@ export class ProviderGame {
   maxBet!: number;
 }
 
+@Entity({ name: 'provider_casinos' })
+export class ProviderCasino {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'casino_code', type: 'varchar', length: 64, unique: true })
+  casinoCode!: string;
+
+  @Column({ type: 'varchar', length: 128 })
+  name!: string;
+
+  @Column({ name: 'casino_api_endpoint', type: 'varchar', length: 512 })
+  casinoApiEndpoint!: string;
+
+  @Column({ name: 'casino_secret', type: 'varchar', length: 256 })
+  casinoSecret!: string;
+
+  @Column({ name: 'is_active', type: 'boolean', default: true })
+  isActive!: boolean;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
 @Entity({ name: 'provider_customers' })
 export class ProviderCustomer {
   @PrimaryGeneratedColumn('uuid')
@@ -34,8 +58,12 @@ export class ProviderCustomer {
   @Column({ name: 'player_id', type: 'varchar', length: 128, unique: true })
   playerId!: string;
 
-  @Column({ name: 'casino_code', type: 'varchar', length: 64 })
-  casinoCode!: string;
+  @Column({ name: 'casino_id', type: 'uuid' })
+  casinoId!: string;
+
+  @ManyToOne(() => ProviderCasino)
+  @JoinColumn({ name: 'casino_id' })
+  casino!: ProviderCasino;
 
   @Column({ name: 'external_user_id', type: 'varchar', length: 128 })
   externalUserId!: string;

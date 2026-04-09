@@ -172,9 +172,20 @@ casinoRouter.post(
     // both must commit (the failure path needs to persist its cache row so a
     // retry replays the same answer instead of retrying the balance check).
     const result = await AppDataSource.transaction(async (manager) => {
-      // 1) Idempotency replay.
+      // 1) Idempotency replay — preserve the original status/transactionId
+      //    but always return the *current* wallet balance, not the snapshot
+      //    that was authoritative when the original tx committed.
       const cached = await findCachedTx(manager, input.transactionId);
-      if (cached) return cached.responseCache as { status: string };
+      if (cached) {
+        const session = await loadSessionByToken(manager, input.sessionToken);
+        const liveWallet = await manager.getRepository(CasinoWallet).findOneBy({
+          id: session.walletId,
+        });
+        return {
+          ...(cached.responseCache as { status: string }),
+          balance: liveWallet ? liveWallet.playableBalance : undefined,
+        } as { status: string; balance?: number };
+      }
 
       // 2) Resolve session, then lock the wallet row.
       const session = await loadSessionByToken(manager, input.sessionToken);
@@ -272,7 +283,16 @@ casinoRouter.post(
 
     const result = await AppDataSource.transaction(async (manager) => {
       const cached = await findCachedTx(manager, input.transactionId);
-      if (cached) return cached.responseCache;
+      if (cached) {
+        const session = await loadSessionByToken(manager, input.sessionToken);
+        const liveWallet = await manager.getRepository(CasinoWallet).findOneBy({
+          id: session.walletId,
+        });
+        return {
+          ...(cached.responseCache as Record<string, unknown>),
+          balance: liveWallet ? liveWallet.playableBalance : undefined,
+        };
+      }
 
       const session = await loadSessionByToken(manager, input.sessionToken);
       const wallet = await manager.getRepository(CasinoWallet).findOne({
@@ -424,6 +444,9 @@ casinoRouter.post(
 casinoRouter.post(
   '/simulateRound',
   wrap(async (req, res) => {
+    const casinoCode = (req.body && typeof req.body.casinoCode === 'string')
+      ? req.body.casinoCode
+      : 'JAQPOT';
     const launchResp = await signedPost<{
       sessionToken: string;
       providerSessionId: string;
@@ -445,6 +468,7 @@ casinoRouter.post(
     const simResp = await signedPost(
       `${config.PROVIDER_BASE_URL}/provider/simulate`,
       {
+        casinoCode,
         casinoSessionToken: sessionToken,
         providerSessionId,
         customerId,

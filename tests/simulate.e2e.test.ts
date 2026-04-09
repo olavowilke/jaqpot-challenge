@@ -7,20 +7,20 @@
  *  - Read-only /casino/getBalance
  *  - Full /casino/simulateRound flow
  *
- * Requires a running Postgres reachable at DATABASE_URL with migrations applied.
- * Skipped automatically when DATABASE_URL is not set.
+ * The suite is fully self-contained: it boots a throwaway Postgres container
+ * via Testcontainers, points the app at it, runs the real migrations, and
+ * tears it all down at the end. No shared state with any dev DB.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import type { DataSource } from 'typeorm';
-
-const hasDb = !!process.env.DATABASE_URL;
-const d = hasDb ? describe : describe.skip;
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 
 const SEED_WALLET_ID = '22222222-2222-2222-2222-222222222222';
 
-d('jaqpot casino+provider e2e', () => {
+describe('jaqpot casino+provider e2e', () => {
+  let pgContainer: StartedPostgreSqlContainer;
   let server: Server;
   let baseUrl: string;
   let dataSource: DataSource;
@@ -79,6 +79,15 @@ d('jaqpot casino+provider e2e', () => {
   // ---------- bootstrap ----------
 
   beforeAll(async () => {
+    // 1) Spin up a throwaway Postgres. Must happen before any module that
+    //    reads DATABASE_URL is imported, hence the dynamic imports below.
+    pgContainer = await new PostgreSqlContainer('postgres:16-alpine')
+      .withDatabase('jaqpot_test')
+      .withUsername('jaqpot')
+      .withPassword('jaqpot')
+      .start();
+
+    process.env.DATABASE_URL = pgContainer.getConnectionUri();
     process.env.PORT = '0';
     process.env.CASINO_SECRET ||= 'test-casino-secret';
     process.env.PROVIDER_SECRET ||= 'test-provider-secret';
@@ -86,6 +95,13 @@ d('jaqpot casino+provider e2e', () => {
     process.env.PROVIDER_BASE_URL ||= 'http://localhost:0';
     CASINO_SECRET = process.env.CASINO_SECRET!;
     PROVIDER_SECRET = process.env.PROVIDER_SECRET!;
+
+    // 2) Run migrations against the fresh container.
+    const dsModEarly = await import('../src/db/data-source.js');
+    if (!dsModEarly.AppDataSource.isInitialized) {
+      await dsModEarly.AppDataSource.initialize();
+    }
+    await dsModEarly.AppDataSource.runMigrations({ transaction: 'each' });
 
     const { bootstrap } = await import('../src/index.js');
     const app = await bootstrap();
@@ -105,12 +121,18 @@ d('jaqpot casino+provider e2e', () => {
     const hmac = await import('../src/shared/hmac.js');
     signString = hmac.signString;
 
+    await dataSource.query(
+      `UPDATE provider_casinos SET casino_api_endpoint = $1, casino_secret = $2, is_active = TRUE WHERE casino_code = 'JAQPOT'`,
+      [baseUrl, CASINO_SECRET],
+    );
+
     await resetWallet();
   });
 
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (dataSource?.isInitialized) await dataSource.destroy();
+    if (pgContainer) await pgContainer.stop();
   });
 
   // ============================================================
@@ -269,6 +291,86 @@ d('jaqpot casino+provider e2e', () => {
         [SEED_WALLET_ID],
       );
       expect(Number(bal[0].b)).toBe(100);
+    });
+
+    it('replaying a debit returns the *current* wallet balance, not the snapshot from when it first committed', async () => {
+      await resetWallet(10_000);
+      const session = await launchFreshSession();
+      const txA = `dbt-a-${Date.now()}-${Math.random()}`;
+      const txB = `dbt-b-${Date.now()}-${Math.random()}`;
+
+      const a1 = await casinoCall('/casino/debit', {
+        transactionId: txA,
+        sessionToken: session,
+        amount: 1000,
+      });
+      expect(a1.status).toBe(200);
+      expect((a1.body as { balance: number }).balance).toBe(9_000);
+
+      // Different tx moves the wallet between original and replay.
+      const b = await casinoCall('/casino/debit', {
+        transactionId: txB,
+        sessionToken: session,
+        amount: 500,
+      });
+      expect((b.body as { balance: number }).balance).toBe(8_500);
+
+      // Replay txA: status preserved, transactionId preserved, balance is live.
+      const a2 = await casinoCall('/casino/debit', {
+        transactionId: txA,
+        sessionToken: session,
+        amount: 1000,
+      });
+      expect(a2.status).toBe(200);
+      const a2body = a2.body as { status: string; transactionId: string; balance: number };
+      expect(a2body.status).toBe('OK');
+      expect(a2body.transactionId).toBe(txA);
+      expect(a2body.balance).toBe(8_500);
+
+      // And only one ledger row exists for txA.
+      const ledger = await dataSource.query(
+        `SELECT COUNT(*)::int AS n FROM casino_transactions WHERE external_transaction_id = $1`,
+        [txA],
+      );
+      expect(ledger[0].n).toBe(1);
+    });
+
+    it('replaying a credit returns the *current* wallet balance, not the snapshot from when it first committed', async () => {
+      await resetWallet(10_000);
+      const session = await launchFreshSession();
+      const crd = `crd-${Date.now()}-${Math.random()}`;
+      const dbt = `dbt-${Date.now()}-${Math.random()}`;
+
+      const c1 = await casinoCall('/casino/credit', {
+        transactionId: crd,
+        sessionToken: session,
+        amount: 2000,
+      });
+      expect((c1.body as { balance: number }).balance).toBe(12_000);
+
+      const d = await casinoCall('/casino/debit', {
+        transactionId: dbt,
+        sessionToken: session,
+        amount: 700,
+      });
+      expect((d.body as { balance: number }).balance).toBe(11_300);
+
+      const c2 = await casinoCall('/casino/credit', {
+        transactionId: crd,
+        sessionToken: session,
+        amount: 2000,
+      });
+      expect(c2.status).toBe(200);
+      const c2body = c2.body as { status: string; transactionId: string; balance: number };
+      expect(c2body.status).toBe('OK');
+      expect(c2body.transactionId).toBe(crd);
+      expect(c2body.balance).toBe(11_300);
+
+      const ledger = await dataSource.query(
+        `SELECT COUNT(*)::int AS n FROM casino_transactions WHERE external_transaction_id = $1`,
+        [crd],
+      );
+      expect(ledger[0].n).toBe(1);
     });
 
     it('handles concurrent retries of the same transactionId atomically (one ledger row, one balance movement)', async () => {
@@ -497,6 +599,7 @@ d('jaqpot casino+provider e2e', () => {
       const r = await post(
         '/provider/simulate',
         {
+          casinoCode: 'JAQPOT',
           casinoSessionToken: 'x',
           providerSessionId: 'y',
           customerId: '00000000-0000-0000-0000-000000000000',
@@ -506,6 +609,78 @@ d('jaqpot casino+provider e2e', () => {
         { secret: CASINO_SECRET, header: 'x-provider-signature' },
       );
       expect(r.status).toBe(401);
+    });
+  });
+
+  // ============================================================
+  // provider_casinos directory: lookup, inactive, missing
+  // ============================================================
+
+  describe('provider_casinos directory', () => {
+    it('/provider/simulate rejects an unknown casino code with 404 CASINO_NOT_FOUND', async () => {
+      const r = await providerCall('/provider/simulate', {
+        casinoCode: 'DOES_NOT_EXIST',
+        casinoSessionToken: 'x',
+        providerSessionId: 'y',
+        customerId: '00000000-0000-0000-0000-000000000000',
+        providerInternalGameId: '00000000-0000-0000-0000-000000000000',
+        currency: 'USD',
+      });
+      expect(r.status).toBe(404);
+      expect((r.body as { error: { code: string } }).error.code).toBe('CASINO_NOT_FOUND');
+    });
+
+    it('/provider/simulate rejects an inactive casino with 409 CASINO_INACTIVE', async () => {
+      await dataSource.query(
+        `UPDATE provider_casinos SET is_active = FALSE WHERE casino_code = 'JAQPOT'`,
+      );
+      try {
+        const r = await providerCall('/provider/simulate', {
+          casinoCode: 'JAQPOT',
+          casinoSessionToken: 'x',
+          providerSessionId: 'y',
+          customerId: '00000000-0000-0000-0000-000000000000',
+          providerInternalGameId: '00000000-0000-0000-0000-000000000000',
+          currency: 'USD',
+        });
+        expect(r.status).toBe(409);
+        expect((r.body as { error: { code: string } }).error.code).toBe('CASINO_INACTIVE');
+      } finally {
+        await dataSource.query(
+          `UPDATE provider_casinos SET is_active = TRUE WHERE casino_code = 'JAQPOT'`,
+        );
+      }
+    });
+
+    it('/casino/simulateRound fails fast when the directory row is disabled', async () => {
+      await resetWallet();
+      await dataSource.query(
+        `UPDATE provider_casinos SET is_active = FALSE WHERE casino_code = 'JAQPOT'`,
+      );
+      try {
+        const r = await post('/casino/simulateRound', { casinoCode: 'JAQPOT' });
+        expect(r.status).toBeGreaterThanOrEqual(400);
+      } finally {
+        await dataSource.query(
+          `UPDATE provider_casinos SET is_active = TRUE WHERE casino_code = 'JAQPOT'`,
+        );
+      }
+    });
+
+    it('/provider/launch (via /casino/launchGame) writes provider_customers.casino_id matching provider_casinos.id', async () => {
+      await resetWallet();
+      const session = await launchFreshSession();
+      expect(session).toBeTruthy();
+
+      const rows = await dataSource.query(
+        `SELECT pc.casino_id, pcas.casino_code
+           FROM provider_customers pc
+           JOIN provider_casinos pcas ON pcas.id = pc.casino_id
+          WHERE pc.player_id = 'JAQPOT:11111111-1111-1111-1111-111111111111'`,
+      );
+      expect(rows.length).toBe(1);
+      expect(rows[0].casino_code).toBe('JAQPOT');
+      expect(rows[0].casino_id).toBeTruthy();
     });
   });
 });

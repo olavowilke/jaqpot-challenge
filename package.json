@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "build": "tsc",
     "migrate": "tsx scripts/migrate.ts",
+    "seed": "tsx scripts/seed.ts",
     "test": "tsx scripts/test.ts",
     "test:only": "vitest run",
     "simulate": "curl -s -X POST http://localhost:3000/casino/simulateRound -H \"content-type: application/json\" -d \"{}\""
@@ -23,6 +24,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^11.14.0",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.10",
     "@types/pg": "^8.11.6",

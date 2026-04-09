@@ -16,7 +16,8 @@
     { "key": "sessionToken", "value": "" },
     { "key": "providerSessionId", "value": "" },
     { "key": "customerId", "value": "" },
-    { "key": "providerInternalGameId", "value": "" }
+    { "key": "providerInternalGameId", "value": "" },
+    { "key": "casinoCode", "value": "JAQPOT" }
   ],
   "item": [
     {
@@ -194,7 +195,7 @@
         "header": [{ "key": "Content-Type", "value": "application/json" }],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"gameId\": \"{{gameId}}\",\n  \"currency\": \"{{currency}}\"\n}"
+          "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"gameId\": \"{{gameId}}\",\n  \"currency\": \"{{currency}}\",\n  \"casinoCode\": \"{{casinoCode}}\"\n}"
         },
         "url": {
           "raw": "{{casinoBaseUrl}}/casino/simulateRound",
@@ -224,7 +225,7 @@
         "header": [{ "key": "Content-Type", "value": "application/json" }],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"casinoSessionToken\": \"{{sessionToken}}\",\n  \"userId\": \"{{userId}}\",\n  \"casinoCode\": \"JAQPOT\",\n  \"providerGameId\": \"BOOK_OF_DEAD\",\n  \"currency\": \"{{currency}}\"\n}"
+          "raw": "{\n  \"casinoSessionToken\": \"{{sessionToken}}\",\n  \"userId\": \"{{userId}}\",\n  \"casinoCode\": \"JAQPOT\",\n  \"providerGameId\": \"slot-001\",\n  \"currency\": \"{{currency}}\"\n}"
         },
         "url": {
           "raw": "{{providerBaseUrl}}/provider/launch",
@@ -254,7 +255,7 @@
         "header": [{ "key": "Content-Type", "value": "application/json" }],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"casinoSessionToken\": \"{{sessionToken}}\",\n  \"providerSessionId\": \"{{providerSessionId}}\",\n  \"customerId\": \"{{customerId}}\",\n  \"providerInternalGameId\": \"{{providerInternalGameId}}\",\n  \"currency\": \"{{currency}}\"\n}"
+          "raw": "{\n  \"casinoCode\": \"{{casinoCode}}\",\n  \"casinoSessionToken\": \"{{sessionToken}}\",\n  \"providerSessionId\": \"{{providerSessionId}}\",\n  \"customerId\": \"{{customerId}}\",\n  \"providerInternalGameId\": \"{{providerInternalGameId}}\",\n  \"currency\": \"{{currency}}\"\n}"
         },
         "url": {
           "raw": "{{providerBaseUrl}}/provider/simulate",
