@@ -8,7 +8,8 @@
     "start": "tsx src/index.ts",
     "build": "tsc",
     "migrate": "tsx scripts/migrate.ts",
-    "test": "vitest run",
+    "test": "tsx scripts/test.ts",
+    "test:only": "vitest run",
     "simulate": "curl -s -X POST http://localhost:3000/casino/simulateRound -H \"content-type: application/json\" -d \"{}\""
   },
   "dependencies": {

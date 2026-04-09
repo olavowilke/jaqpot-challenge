@@ -168,10 +168,13 @@ casinoRouter.post(
   wrap(async (req, res) => {
     const input = DebitSchema.parse(req.body);
 
+    // The transaction returns either an OK or an INSUFFICIENT_FUNDS payload —
+    // both must commit (the failure path needs to persist its cache row so a
+    // retry replays the same answer instead of retrying the balance check).
     const result = await AppDataSource.transaction(async (manager) => {
       // 1) Idempotency replay.
       const cached = await findCachedTx(manager, input.transactionId);
-      if (cached) return cached.responseCache;
+      if (cached) return cached.responseCache as { status: string };
 
       // 2) Resolve session, then lock the wallet row.
       const session = await loadSessionByToken(manager, input.sessionToken);
@@ -181,7 +184,7 @@ casinoRouter.post(
       });
       if (!wallet) throw new AppError(404, 'WALLET_NOT_FOUND', 'Wallet not found');
 
-      // 3) Insufficient funds → cache the failure for deterministic retries.
+      // 3) Insufficient funds → cache the failure and return it (commits).
       if (wallet.playableBalance < input.amount) {
         const failPayload = {
           status: 'INSUFFICIENT_FUNDS',
@@ -201,11 +204,11 @@ casinoRouter.post(
         } catch (e) {
           if (isUniqueViolation(e)) {
             const replay = await findCachedTx(manager, input.transactionId);
-            if (replay) return replay.responseCache;
+            if (replay) return replay.responseCache as { status: string };
           }
           throw e;
         }
-        throw new AppError(402, 'INSUFFICIENT_FUNDS', 'Insufficient balance');
+        return failPayload;
       }
 
       // 4) Apply debit + insert ledger row in the same tx.
@@ -238,6 +241,15 @@ casinoRouter.post(
       return okPayload;
     });
 
+    // First call to a failing debit returns 402; subsequent replays of the
+    // same transactionId hit the idempotency cache and return 200 with the
+    // same cached payload (matches the spec: "store the first successful
+    // result and return it for duplicates", extended to failures so that
+    // retries are byte-deterministic).
+    if (result.status === 'INSUFFICIENT_FUNDS') {
+      res.status(402).json(result);
+      return;
+    }
     res.json(result);
   }),
 );

@@ -5,7 +5,11 @@
       "Bash(npx tsc:*)",
       "Bash(node_modules/.bin/tsc --noEmit)",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(cp .env.example .env)",
+      "Bash(docker compose:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)"
     ]
   }
 }
