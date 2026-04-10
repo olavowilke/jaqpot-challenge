@@ -4,3 +4,5 @@ dist
 *.log
 *.pdf
 EXECUTION_PLAN.md
+
+.idea/
