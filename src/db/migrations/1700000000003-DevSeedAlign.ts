@@ -1,4 +1,4 @@
-import type { MigrationInterface, QueryRunner } from 'typeorm';
+import type {MigrationInterface, QueryRunner} from 'typeorm';
 
 /**
  * Aligns the seeded `provider_casinos` row with the runtime env so that the
@@ -11,23 +11,22 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  * `npm run seed` to re-align after changing your .env.
  */
 export class DevSeedAlign1700000000003 implements MigrationInterface {
-  name = 'DevSeedAlign1700000000003';
+    name = 'DevSeedAlign1700000000003';
 
-  public async up(q: QueryRunner): Promise<void> {
-    const casinoSecret = process.env.CASINO_SECRET ?? 'dev-casino-secret';
-    const casinoBaseUrl = process.env.CASINO_BASE_URL ?? 'http://localhost:3000';
+    public async up(q: QueryRunner): Promise<void> {
+        const casinoSecret = process.env.CASINO_SECRET ?? 'dev-casino-secret';
+        const casinoBaseUrl = process.env.CASINO_BASE_URL ?? 'http://localhost:3000';
 
-    await q.query(
-      `UPDATE provider_casinos
-          SET casino_secret       = $1,
-              casino_api_endpoint = $2,
-              is_active           = TRUE
-        WHERE casino_code = 'JAQPOT'`,
-      [casinoSecret, casinoBaseUrl],
-    );
-  }
+        await q.query(
+            `UPDATE provider_casinos
+             SET casino_secret       = $1,
+                 casino_api_endpoint = $2,
+                 is_active           = TRUE
+             WHERE casino_code = 'JAQPOT'`,
+            [casinoSecret, casinoBaseUrl],
+        );
+    }
 
-  public async down(): Promise<void> {
-    // No-op — the row itself was created by 1700000000002-ProviderCasinos.
-  }
+    public async down(): Promise<void> {
+    }
 }

@@ -1,4 +1,4 @@
-import type { ValueTransformer } from 'typeorm';
+import type {ValueTransformer} from 'typeorm';
 
 /**
  * Postgres BIGINT comes back as a string by default. All our amounts are
@@ -6,6 +6,6 @@ import type { ValueTransformer } from 'typeorm';
  * to/from number for ergonomics.
  */
 export const bigintToNumber: ValueTransformer = {
-  to: (v?: number | null) => v,
-  from: (v?: string | null) => (v == null ? v : Number(v)),
+    to: (v?: number | null) => v,
+    from: (v?: string | null) => (v == null ? v : Number(v)),
 };
